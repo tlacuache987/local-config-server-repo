@@ -4,7 +4,7 @@ logging:
   level:
     mx.santander: DEBUG
 server:
-  port: 8081
+  port: 9091
 spring:
   #redis:
     #host: localhost
