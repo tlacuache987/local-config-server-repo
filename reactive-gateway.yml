@@ -1,0 +1,93 @@
+logging:
+  level:
+    mx.santander: DEBUG
+server:
+  port: 8081
+spring:
+  #redis:
+    #host: localhost
+  cloud:
+    gateway:
+      routes:
+      
+      # NRT -> fallback AaaS     
+      - id: path_nrt
+        #uri: https://nrt-service-sample-mxtransfdigital-dev.appls.cto1.paas.gsnetcloud.corp
+        uri: http://localhost:9091
+        predicates:
+        - Path=/service/{party}/card/{card} #  /service/1/card/123
+        filters:
+        - name: QueryTransactionCircuitBreaker
+          args:
+            name: cb_path_fallback_aaas
+            statusCodes: ['500','404','400']
+            fallbackUri: forward:/aaas/service/{party}/card/{card}
+        #- name: Cache
+          #args:
+            #enable: true
+            #redisPrefix: mx:santander:test # mx:santander:lmwg:123123123123:133
+            #timeToLife: 10000 # milliseconds
+            #preticateKeys: party-body,card-body #party-query,card-query #party-header,card-header #party-path,card-path
+            
+      # Fallback AaaS -> fallback DDF
+      - id: path_fallback_aaas
+        #uri: https://aaas-service-sample-mxtransfdigital-dev.appls.cto1.paas.gsnetcloud.corp
+        uri: http://localhost:9092
+        predicates:
+        - Path=/aaas/service/{party}/card/{card}
+        filters:
+        #- RewritePath=/aaas/service/(?<party>.*)/card/(?<card>.*), /service/${party}/card/${card}
+        - StripPrefix=1
+        - name: QueryTransactionCircuitBreaker
+          args:
+            name: cb_path_fallback_ddf
+            statusCodes: ['500','404','400']
+            fallbackUri: forward:/ddf/service/{party}/card/{card}
+            
+      # Fallback DDF
+      - id: path_fallback_ddf
+        #uri: https://ddf-service-sample-mxtransfdigital-dev.appls.cto1.paas.gsnetcloud.corp 
+        uri: http://localhost:9093
+        predicates:
+        - Path=/ddf/service/{party}/card/{card}
+        filters:
+        #- RewritePath=/ddf/service/(?<party>.*)/card/(?<card>.*), /service/${party}/card/${card}
+        - StripPrefix=1
+            
+# RESILIENCE4J PROPERTIES
+resilience4j:
+  timelimiter:
+    instances:
+     cb_path_fallback_aaas:
+        timeout-duration: 1s
+     cb_path_fallback_ddf:
+        timeout-duration: 1s
+
+resilience4j.circuitbreaker:       
+  configs:
+    default:
+        slidingWindowSize: 100
+        minimum-number-of-calls: 10
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        waitDurationInOpenState: 60s
+        failureRateThreshold: 50
+        eventConsumerBufferSize: 10
+        recordExceptions:
+          - org.springframework.web.client.HttpServerErrorException
+          - java.io.IOException
+          - org.springframework.cloud.gateway.filter.factory.SpringCloudCircuitBreakerFilterFactory.CircuitBreakerStatusCodeException
+        ignoreExceptions:
+          - java.lang.IllegalStateException 
+    shared:
+        slidingWindowSize: 100
+        waitDurationInOpenState: 60s
+        failureRateThreshold: 50
+        eventConsumerBufferSize: 10
+        ignoreExceptions:
+          - java.lang.IllegalStateException
+  instances:
+    cb_path_fallback_aaas:
+      baseConfig: default
+    cb_path_fallback_ddf:
+      baseConfig: default
+      
